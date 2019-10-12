@@ -1,4 +1,4 @@
-# tbFLASHCARD
+# tbFlashcard
 
 * Language: **C**
 
