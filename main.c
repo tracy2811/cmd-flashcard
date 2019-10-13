@@ -185,13 +185,9 @@ int main() {
 		printf("/d\t\tDelete flashcard\n");
 		printf("/q\t\tQuit\n\n");
 		
-		fgets(command, MAXINPUTLEN, stdin);
+		read_text(command, MAXINPUTLEN);
 		printf("-------------------------------------\n");
 	
-		if (command[strlen(command)-1] == '\n') {
-			command[strlen(command)-1] = '\0';
-		}
-
 		if (strcmp("/a", command) == 0) {
 			add();
 		} else if (strcmp("/e", command) == 0) {
