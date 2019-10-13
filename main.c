@@ -32,16 +32,26 @@ void init(void) {
 	sqlite3_free(err_msg);
 }
 
-// read id as long integer
-long read_id() {
+// read number
+long read_number() {
 	char input[MAXINPUTLEN], *endptr;
 	fgets(input, MAXINPUTLEN, stdin);
+	fflush(stdin);
 	long val = strtol(input, &endptr, 10);
 	return val;
 }
 
+// read text 
+void read_text(char *input, int len) {
+	fgets(input, len, stdin);
+	fflush(stdin);
+	if (input[strlen(input)-1] = '\n') {
+		input[strlen(input)-1] = '\0';
+	}
+}
+
 // Callback 
-static int callback(void *notused, int argc, char **argv, char **azcolname) {
+static int display_callback(void *notused, int argc, char **argv, char **azcolname) {
 	int i;
 	for (int i = 0; i < argc; ++i) {
 		printf("%s\t\t%s\n", azcolname[i], argv[i] ? argv[i] : "NULL");
@@ -50,22 +60,26 @@ static int callback(void *notused, int argc, char **argv, char **azcolname) {
 	return 0;
 }
 
+// Display flashcard by id
+int display_id(long id) {
+	sprintf(sql, "SELECT fside, sside FROM %s WHERE id = %ld", TBNAME, id);
+	if (sqlite3_exec(db, sql, display_callback, 0, &err_msg)) {
+		fprintf(stderr, "Failed to display flashcards: %s\n", err_msg);
+		sqlite3_free(err_msg);
+		return 1;
+	}
+	sqlite3_free(err_msg);
+	return 0;
+}
+
 // Add new flashcard
 int add(void) {
 	char fside[MAXINPUTLEN], sside[MAXINPUTLEN];
 	printf("First side: ");
-	fgets(fside, MAXINPUTLEN, stdin);
-	fflush(stdin);
+	read_text(fside, MAXINPUTLEN);
 	printf("\nSecond side: ");
-	fgets(sside, MAXINPUTLEN, stdin);
+	read_text(sside, MAXINPUTLEN);
 	printf("\n");
-
-	if (fside[strlen(fside)-1] == '\n') {
-		fside[strlen(fside)-1] = '\0';
-	}
-	if (sside[strlen(sside)-1] == '\n') {
-		sside[strlen(sside)-1] = '\0';
-	}
 
 	sprintf(sql, "INSERT INTO %s VALUES(NULL, ?, ?)", TBNAME);
 	if (sqlite3_prepare_v2(db, sql, -1, &res, 0) || sqlite3_bind_text(res, 1, fside, -1, SQLITE_STATIC) || sqlite3_bind_text(res, 2, sside, -1, SQLITE_STATIC) || sqlite3_step(res) != SQLITE_DONE) {
@@ -80,20 +94,28 @@ int add(void) {
 
 // Delete flashcard by id
 int delete(void) {
-	long id;
-	char input[MAXINPUTLEN];
+	long id = 0;
 	printf("Flashcard ID: ");
-	id = read_id();
+	id = read_number();
 	printf("\n");
 
-	sprintf(sql, "DELETE FROM %s WHERE id = %d", TBNAME, id);
-	if (sqlite3_exec(db, sql, 0, 0, &err_msg)) {
-		fprintf(stderr, "Failed to deleted flashcard %d: %s\n", id, err_msg);
+	if (id != 0) {
+		display_id(id);
+		printf("Delete flashcard (1/0)? ");
+		long confirm = read_number();
+
+		if (confirm == 1) {
+			sprintf(sql, "DELETE FROM %s WHERE id = %d", TBNAME, id);
+			if (sqlite3_exec(db, sql, 0, 0, &err_msg)) {
+				fprintf(stderr, "Failed to deleted flashcard %d: %s\n", id, err_msg);
+				sqlite3_free(err_msg);
+				return 1;
+		}
+		printf("Flashcard %d deleted!\n", id);
 		sqlite3_free(err_msg);
-		return 1;
+		}
 	}
-	printf("Flashcard %d deleted!\n", id);
-	sqlite3_free(err_msg);
+
 	return 0;
 }
 
@@ -103,42 +125,45 @@ int update(void) {
 	char fside[MAXINPUTLEN], sside[MAXINPUTLEN];
 
 	printf("Flashcard ID: ");
-	id = read_id();
-	printf("\nNew first side: ");
-	fgets(fside, MAXINPUTLEN, stdin);
-	printf("\nNew second side: ");
-	fgets(sside, MAXINPUTLEN, stdin);
-	printf("\n");
+	id = read_number();
+	if (id != 0) {
+		display_id(id);
 
-	if (fside[strlen(fside)-1] == '\n') {
-		fside[strlen(fside)-1] = '\0';
-	}
-	if (sside[strlen(sside)-1] == '\n') {
-		sside[strlen(sside)-1] = '\0';
-	}
+		printf("\nNew first side: ");
+		read_text(fside, MAXINPUTLEN);
+		printf("\nNew second side: ");
+		read_text(sside, MAXINPUTLEN);
+		printf("\n");
 
-	sprintf(sql, "UPDATE %s SET fside = '%s', sside = '%s' WHERE id = %d", TBNAME, fside, sside, id);
-	if (sqlite3_exec(db, sql, 0, 0, &err_msg)) {
-		fprintf(stderr, "Failed update flashcard %d: %s\n", id, err_msg);
+		sprintf(sql, "UPDATE %s SET fside = ?, sside = ? WHERE id = ?", TBNAME);
+		if (sqlite3_prepare_v2(db, sql, -1, &res, 0) || sqlite3_bind_text(res, 1, fside, -1, SQLITE_STATIC) || sqlite3_bind_text(res, 2, sside, -1, SQLITE_STATIC) || sqlite3_bind_int(res, 3, id) || sqlite3_step(res) != SQLITE_DONE) {
+			fprintf(stderr, "Failed update flashcard %d: %s\n", id, sqlite3_errmsg(db));
+			sqlite3_finalize(res);
+			return 1;
+		}
+		printf("Flashcard %d updated!\n", id);
 		sqlite3_free(err_msg);
-		return 1;
 	}
-	printf("Flashcard %d updated!\n", id);
-	sqlite3_free(err_msg);
 	return 0;
 }
 
-// Retrieve flashcard by id
-
-// Search for flashcards
-
 // Random pickup flashcard to learn
+int random_pick(void) {
+	sprintf(sql, "SELECT fside, sside FROM %s WHERE id IN (SELECT id FROM %s ORDER BY RANDOM() LIMIT 1)", TBNAME, TBNAME);
+	if (sqlite3_exec(db, sql, display_callback, 0, &err_msg)) {
+		fprintf(stderr, "Failed to pickup flashcard: %s\n", err_msg);
+		sqlite3_free(err_msg);
+		return 1;
+	}
+	sqlite3_free(err_msg);
+	return 0;
+}
 
 // Display all flashcard
 int display(void) {
 	printf("YOUR FLASHCARDS\n\n");
 	sprintf(sql, "SELECT * FROM %s", TBNAME);
-	if (sqlite3_exec(db, sql, callback, 0, &err_msg)) {
+	if (sqlite3_exec(db, sql, display_callback, 0, &err_msg)) {
 		fprintf(stderr, "Failed to display flashcards: %s\n", err_msg);
 		sqlite3_free(err_msg);
 		return 1;
@@ -154,6 +179,7 @@ int main() {
 	while (1) {
 		printf("\n-------------------------------------\n");
 		printf("/da\t\tDisplay all flashcards\n");
+		printf("/r\t\tPick a random flashcard\n");
 		printf("/a\t\tAdd new flashcard\n");
 		printf("/e\t\tEdit flashcard\n");
 		printf("/d\t\tDelete flashcard\n");
@@ -174,6 +200,8 @@ int main() {
 			delete();
 		} else if (strcmp("/da", command) == 0) {
 			display();
+		} else if (strcmp("/r", command) == 0) {
+			random_pick();
 		} else if (strcmp("/q", command) == 0) {
 			break;
 		}
